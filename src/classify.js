@@ -5,9 +5,11 @@ const SYSTEM = `너는 로엔(LOEN) 앱의 QA 제보 분류 봇이다.
 아래 [라우팅 맵] 기준으로 디스코드 제보 스레드를 분류해 JSON 하나로만 답한다.
 
 규칙:
-- 서비스·기능·증상이 대략 파악되면 enough=true 로 바로 진행한다(관대하게).
-- 정말 핵심(무슨 화면/기능, 증상)이 빠졌을 때만 enough=false 로 questions에 1~2개 짧은 한국어 질문을 담는다.
-- 기기·재현 디테일이 없다고 되묻지 않는다 → 추정하고 confidence로 표시.
+- [라우팅 맵]의 "필수 데이터"가 모두 있으면(또는 자명하면) enough=true.
+- 필수 데이터 중 빠진 게 있으면 enough=false 로, 빠진 항목만 questions에 1~2개 짧은 한국어 질문으로 담는다.
+- 기대 동작은 필수지만, 증상에서 자명하면(크래시·먹통·로그인 불가 등) 묻지 않고 통과한다.
+- 기종(iOS/Android)은 UI·화면 문제일 때만 필수다. 서버·데이터·로직 문제면 묻지 않는다.
+- "권장/선택" 데이터(재현 절차·빈도·스크린샷 등)는 없어도 되묻지 않는다 → 추정하고 confidence로 표시.
 - 마크다운/설명 없이 아래 스키마의 JSON 객체 하나만 출력한다.
 
 [라우팅 맵]
@@ -29,20 +31,43 @@ ${ROUTING_MAP}
 
 export async function classify(transcript) {
   const userMsg = `제보 스레드 전체:\n${transcript}`;
-  const text =
-    config.provider === 'anthropic'
-      ? await viaAnthropic(userMsg)
-      : await viaGemini(userMsg);
+  const call = (attempt) =>
+    config.provider === 'anthropic' ? viaAnthropic(userMsg) : viaGemini(userMsg, attempt);
+  const text = await withRetry(call);
   return parseJson(text);
 }
 
+// 일시적 과부하(503/429/overloaded)에 모델 폴백 + 지수백오프 재시도 — 무료티어 대비
+async function withRetry(fn, tries = 4) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn(i);
+    } catch (e) {
+      last = e;
+      const msg = String(e.message || '');
+      const transient = /503|429|UNAVAILABLE|overloaded|high demand|rate limit/i.test(msg);
+      if (!transient || i === tries - 1) throw e;
+      const wait = 1000 * 2 ** i; // 1s, 2s, 4s
+      console.warn(`  분류 일시 오류, ${wait}ms 후 재시도(${i + 1}/${tries - 1}): ${msg.slice(0, 60)}`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw last;
+}
+
 // --- Gemini (무료 티어 테스트 기본값) ---
+// 과부하 시 시도마다 덜 붐비는 모델로 폴백
+const GEMINI_MODELS = [
+  ...new Set([config.geminiModel, 'gemini-2.0-flash', 'gemini-2.5-flash-lite']),
+];
 let geminiClient;
-async function viaGemini(userMsg) {
+async function viaGemini(userMsg, attempt = 0) {
   const { GoogleGenAI } = await import('@google/genai');
   geminiClient ||= new GoogleGenAI({ apiKey: config.geminiKey });
+  const model = GEMINI_MODELS[Math.min(attempt, GEMINI_MODELS.length - 1)];
   const res = await geminiClient.models.generateContent({
-    model: config.geminiModel,
+    model,
     contents: userMsg,
     config: {
       systemInstruction: SYSTEM,
