@@ -1,8 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { config } from './config.js';
 import { ROUTING_MAP } from './routingMap.js';
-
-const client = new Anthropic({ apiKey: config.anthropicKey });
 
 const SYSTEM = `너는 로엔(LOEN) 앱의 QA 제보 분류 봇이다.
 아래 [라우팅 맵] 기준으로 디스코드 제보 스레드를 분류해 JSON 하나로만 답한다.
@@ -31,23 +28,52 @@ ${ROUTING_MAP}
 }`;
 
 export async function classify(transcript) {
-  const msg = await client.messages.create({
+  const userMsg = `제보 스레드 전체:\n${transcript}`;
+  const text =
+    config.provider === 'anthropic'
+      ? await viaAnthropic(userMsg)
+      : await viaGemini(userMsg);
+  return parseJson(text);
+}
+
+// --- Gemini (무료 티어 테스트 기본값) ---
+let geminiClient;
+async function viaGemini(userMsg) {
+  const { GoogleGenAI } = await import('@google/genai');
+  geminiClient ||= new GoogleGenAI({ apiKey: config.geminiKey });
+  const res = await geminiClient.models.generateContent({
+    model: config.geminiModel,
+    contents: userMsg,
+    config: {
+      systemInstruction: SYSTEM,
+      responseMimeType: 'application/json', // JSON 출력 강제
+      temperature: 0,
+    },
+  });
+  return res.text;
+}
+
+// --- Anthropic Haiku (운영 전환용) ---
+let anthropicClient;
+async function viaAnthropic(userMsg) {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  anthropicClient ||= new Anthropic({ apiKey: config.anthropicKey });
+  const msg = await anthropicClient.messages.create({
     model: config.haikuModel,
     max_tokens: 1024,
     // 라우팅 맵은 매 호출 동일 → 프롬프트 캐시로 비용 절감
     system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
-    messages: [{ role: 'user', content: `제보 스레드 전체:\n${transcript}` }],
+    messages: [{ role: 'user', content: userMsg }],
   });
-  const text = msg.content.map((b) => b.text || '').join('').trim();
-  return parseJson(text);
+  return msg.content.map((b) => b.text || '').join('');
 }
 
 function parseJson(text) {
-  const cleaned = text.replace(/```json|```/g, '').trim();
+  const cleaned = (text || '').replace(/```json|```/g, '').trim();
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start === -1 || end === -1) {
-    throw new Error('분류 JSON 파싱 실패: ' + text.slice(0, 200));
+    throw new Error('분류 JSON 파싱 실패: ' + cleaned.slice(0, 200));
   }
   return JSON.parse(cleaned.slice(start, end + 1));
 }

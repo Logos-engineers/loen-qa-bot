@@ -14,9 +14,14 @@
 2. `cp .env.example .env` 후 값 채우기:
    - `DISCORD_BOT_TOKEN` — discord.com/developers 봇 토큰
    - `QA_FORUM_CHANNEL_ID` — `#qa-제보` 포럼 채널 ID (개발자모드 → 우클릭 → ID 복사)
-   - `ANTHROPIC_API_KEY` — 분류용 (console.anthropic.com)
+   - **분류 모델** — `QA_MODEL_PROVIDER=gemini`(기본, 무료티어 테스트) → `GEMINI_API_KEY` / `anthropic`(운영) → `ANTHROPIC_API_KEY`
    - `GITHUB_TOKEN` — fine-grained PAT, `Logos-engineers/loen-qa-bot`의 `Issues: write`
 3. 로컬 실행: `npm run dev` / 운영: `pm2 start ecosystem.config.cjs`
+
+## 분류 모델 전환
+`.env`의 `QA_MODEL_PROVIDER`로 스위치 (코드 불변):
+- `gemini` (기본): `GEMINI_MODEL=gemini-2.0-flash`, JSON 출력 강제(`responseMimeType`). 무료티어 테스트용.
+- `anthropic`: `HAIKU_MODEL=claude-haiku-4-5-20251001`, 프롬프트 캐시 적용. 운영 권장(설계 확정 모델).
 
 ## 디스코드 봇 권한
 - 인텐트: **Message Content Intent** 켜기 (Developer Portal → Bot → Privileged Gateway Intents)

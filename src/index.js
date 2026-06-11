@@ -20,7 +20,10 @@ function isQaThread(channel) {
 }
 
 client.once(Events.ClientReady, (c) => {
-  console.log(`✓ QA봇 로그인: ${c.user.tag} · 포럼 ${config.forumChannelId} 감시`);
+  const model = config.provider === 'anthropic' ? config.haikuModel : config.geminiModel;
+  console.log(
+    `✓ QA봇 로그인: ${c.user.tag} · 포럼 ${config.forumChannelId} 감시 · 분류=${config.provider}(${model})`,
+  );
 });
 
 client.on(Events.MessageCreate, async (message) => {
