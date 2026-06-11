@@ -1,0 +1,18 @@
+{
+  "name": "loen-qa-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loen QA 제보 → Haiku 분류 → GitHub 이슈 봇",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.40.1",
+    "@octokit/rest": "^21.1.1",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7"
+  }
+}
