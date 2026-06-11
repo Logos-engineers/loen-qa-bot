@@ -4,6 +4,7 @@ import { classify } from './classify.js';
 import { findDuplicate, createIssue } from './github.js';
 import { rehostAttachment } from './storage.js';
 import { issueMessage, dupMessage, askMessage } from './messages.js';
+import { loadThreads, scheduleSave } from './store.js';
 
 const client = new Client({
   intents: [
@@ -15,8 +16,8 @@ const client = new Client({
 });
 
 // 스레드별 상태: { rounds, transcript[], attachments[], status, queue }
-// ⚠️ 인메모리 — 봇 재시작 시 유실(영속화는 배포 전 과제).
-const threads = new Map();
+// 재시작 대비 data/threads.json에 영속화 (store.js). queue는 복원 시 새로 부여.
+const threads = await loadThreads();
 
 function isQaThread(channel) {
   return channel?.isThread?.() && channel.parentId === config.forumChannelId;
@@ -46,6 +47,7 @@ client.on(Events.MessageCreate, (message) => {
   // 같은 스레드는 직렬 처리 → 동시 메시지로 인한 중복 이슈 방지
   state.queue = state.queue
     .then(() => handleMessage(message, state, id))
+    .then(() => scheduleSave(threads)) // 처리 후 상태 영속화
     .catch((e) => console.error('스레드 큐 오류:', e));
 });
 
