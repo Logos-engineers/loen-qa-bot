@@ -4,6 +4,7 @@ module.exports = {
     {
       name: 'loen-qa-bot',
       script: 'src/index.js',
+      exec_mode: 'fork', // Discord 봇은 fork (cluster는 HTTP 서버용)
       instances: 1,
       autorestart: true,
       max_restarts: 10,
