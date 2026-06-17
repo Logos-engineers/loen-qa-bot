@@ -36,3 +36,10 @@
 
 ## 라벨
 `qa-제보` · `area/{backend,frontend,obs-web,ai}` · `feat/{auth,home,note,obs,bible,oikos}` · `severity/P0~P3` · `needs-triage` · `needs-human`
+
+## 이슈 닫힘 → 디스코드 알림 (역방향)
+GitHub 이슈가 **closed** 되면 원본 디스코드 포럼 스레드에 "✅ 해결됨" 답글을 자동으로 남긴다.
+- 워크플로: `.github/workflows/qa-close-notify.yml` (`on: issues: closed`)
+- 스크립트: `scripts/notify-discord-close.mjs` — 이슈 본문의 `출처: …discord.com/channels/{guild}/{thread}/{msg}` 에서 스레드 ID를 파싱해 Discord REST API로 답글
+- QA 봇이 만든 이슈(본문에 출처 URL 존재)만 대상. 그 외 이슈는 조용히 통과
+- **필요 시크릿**: 레포 Settings → Secrets and variables → Actions 에 `DISCORD_BOT_TOKEN` 추가(봇 `.env`와 동일 값). 봇이 해당 포럼에 *스레드에서 메시지 보내기* 권한 보유해야 함

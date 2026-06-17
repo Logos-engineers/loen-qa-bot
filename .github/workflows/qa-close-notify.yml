@@ -1,0 +1,29 @@
+name: QA 이슈 닫힘 → 디스코드 알림
+
+# GitHub 이슈가 닫히면 원본 디스코드 포럼 스레드에 "해결됨" 답글을 남긴다.
+# QA 봇이 만든 이슈(본문에 디스코드 출처 URL 존재)만 대상 — 그 외는 스크립트가 조용히 통과.
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify-discord:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 디스코드 스레드에 해결 답글
+        run: node scripts/notify-discord-close.mjs
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          # 본문/제목은 env로 주입(인라인 ${{ }} 보간 시 스크립트 인젝션 위험 회피)
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_URL: ${{ github.event.issue.html_url }}
