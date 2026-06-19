@@ -3,7 +3,7 @@ import { config } from './config.js';
 import { classify } from './classify.js';
 import { findDuplicate, createIssue } from './github.js';
 import { rehostAttachment } from './storage.js';
-import { issueMessage, dupMessage, askMessage } from './messages.js';
+import { issueMessage, feedbackIssueMessage, dupMessage, askMessage } from './messages.js';
 import { loadThreads, scheduleSave } from './store.js';
 
 const client = new Client({
@@ -19,20 +19,25 @@ const client = new Client({
 // 재시작 대비 data/threads.json에 영속화 (store.js). queue는 복원 시 새로 부여.
 const threads = await loadThreads();
 
-function isQaThread(channel) {
-  return channel?.isThread?.() && channel.parentId === config.forumChannelId;
+// 스레드가 속한 포럼으로 트랙을 정한다. qa 포럼=bug, 피드백 포럼=feedback, 그 외=null(무시).
+function forumKind(channel) {
+  if (!channel?.isThread?.()) return null;
+  if (channel.parentId === config.forumChannelId) return 'bug';
+  if (config.feedbackForumChannelId && channel.parentId === config.feedbackForumChannelId) return 'feedback';
+  return null;
 }
 
 client.once(Events.ClientReady, (c) => {
   const model = config.provider === 'anthropic' ? config.haikuModel : config.geminiModel;
+  const fb = config.feedbackForumChannelId ? `+피드백 ${config.feedbackForumChannelId}` : '(피드백 비활성)';
   console.log(
-    `✓ QA봇 로그인: ${c.user.tag} · 포럼 ${config.forumChannelId} 감시 · 분류=${config.provider}(${model})`,
+    `✓ QA봇 로그인: ${c.user.tag} · 포럼 ${config.forumChannelId} ${fb} 감시 · 분류=${config.provider}(${model})`,
   );
 });
 
 client.on(Events.MessageCreate, (message) => {
   if (message.author.bot) return;
-  if (!isQaThread(message.channel)) return;
+  if (!forumKind(message.channel)) return;
 
   const id = message.channel.id;
   const existing = threads.get(id);
@@ -41,7 +46,7 @@ client.on(Events.MessageCreate, (message) => {
   if (!existing) {
     threads.set(id, state);
     // 포럼 글 "제목"(스레드 이름)도 핵심 맥락 — 본문만 보면 놓친다
-    if (message.channel.name) state.transcript.push(`[제보 제목] ${message.channel.name}`);
+    if (message.channel.name) state.transcript.push(`[제목] ${message.channel.name}`);
   }
 
   // 같은 스레드는 직렬 처리 → 동시 메시지로 인한 중복 이슈 방지
@@ -53,6 +58,7 @@ client.on(Events.MessageCreate, (message) => {
 
 async function handleMessage(message, state, id) {
   if (state.status === 'done') return; // 이미 이슈화된 스레드는 무시
+  const kind = forumKind(message.channel); // 'bug' | 'feedback'
   try {
     const atts = [...message.attachments.values()].map((a) => ({
       url: a.url,
@@ -65,7 +71,7 @@ async function handleMessage(message, state, id) {
         (atts.length ? `\n[첨부: ${atts.map((a) => a.name).join(', ')}]` : ''),
     );
 
-    const result = await classify(state.transcript.join('\n'));
+    const result = await classify(state.transcript.join('\n'), kind);
 
     // 필수 정보 부족 + 라운드 여유 → 되묻기
     if (!result.enough && state.rounds < config.maxRounds) {
@@ -75,7 +81,7 @@ async function handleMessage(message, state, id) {
     }
     if (!result.enough) result.confidence = 'low'; // 라운드 초과 추정 → needs-triage
 
-    const dup = await findDuplicate(result.title);
+    const dup = await findDuplicate(result.title, kind);
     if (dup) {
       state.status = 'done';
       await message.channel.send(dupMessage(dup));
@@ -90,7 +96,8 @@ async function handleMessage(message, state, id) {
 
     const issue = await createIssue(result, { threadUrl: message.url, attachments: hostedUrls });
     state.status = 'done';
-    await message.channel.send(issueMessage(result, issue));
+    const card = kind === 'feedback' ? feedbackIssueMessage(result, issue) : issueMessage(result, issue);
+    await message.channel.send(card);
   } catch (err) {
     console.error('처리 오류:', err);
     const overloaded = /503|429|UNAVAILABLE|overloaded|high demand|rate limit/i.test(

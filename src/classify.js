@@ -1,5 +1,5 @@
 import { config } from './config.js';
-import { ROUTING_MAP } from './routingMap.js';
+import { ROUTING_MAP, FEEDBACK_GUIDE } from './routingMap.js';
 
 const SYSTEM = `너는 로엔(LOEN) 앱의 QA 제보 분류 봇이다.
 아래 [라우팅 맵] 기준으로 디스코드 제보 스레드를 분류해 JSON 하나로만 답한다.
@@ -29,12 +29,50 @@ ${ROUTING_MAP}
   "confidence": "high|medium|low"
 }`;
 
-export async function classify(transcript) {
-  const userMsg = `제보 스레드 전체:\n${transcript}`;
+const FEEDBACK_SYSTEM = `너는 로엔(LOEN) 앱의 베타 피드백 분류 봇이다.
+사용자가 올린 것은 버그 제보가 아니라 "불편/개선 의견(피드백)"이다.
+아래 [라우팅 맵]의 서비스/기능 영역과 [피드백 기준]에 따라 분류해 JSON 하나로만 답한다.
+
+규칙:
+- [피드백 기준]의 "필수 데이터"가 모두 있으면(또는 자명하면) enough=true.
+- 빠진 게 있으면 enough=false 로, 빠진 항목만 questions에 1~2개 짧은 한국어 질문으로 담는다.
+- 피드백은 기종·재현 절차·심각도를 묻지 않는다.
+- feedbackType은 [피드백 기준]의 유형 중 하나로 고른다.
+- service/feature는 추정하되 모르면 service=unknown, feature는 빈 문자열.
+- 마크다운/설명 없이 아래 스키마의 JSON 객체 하나만 출력한다.
+
+[라우팅 맵]
+${ROUTING_MAP}
+
+[피드백 기준]
+${FEEDBACK_GUIDE}
+
+[출력 스키마]
+{
+  "enough": true,
+  "questions": [],
+  "title": "[FEEDBACK] <한 줄 요약>",
+  "service": "loen-frontend|loen-backend|obs-beta-web|ai-server-loen|unknown",
+  "feature": "feat/auth|feat/home|feat/note|feat/obs|feat/bible|feat/oikos|",
+  "feedbackType": "ux|request|content|etc",
+  "summary": "불편/개선 내용 1~2줄",
+  "confidence": "high|medium|low"
+}`;
+
+/**
+ * 스레드를 분류한다.
+ * @param {string} transcript 스레드 전체 텍스트
+ * @param {'bug'|'feedback'} kind 채널로 결정된 트랙 (qa 포럼=bug, 피드백 포럼=feedback)
+ */
+export async function classify(transcript, kind = 'bug') {
+  const system = kind === 'feedback' ? FEEDBACK_SYSTEM : SYSTEM;
+  const userMsg = `${kind === 'feedback' ? '피드백' : '제보'} 스레드 전체:\n${transcript}`;
   const call = (attempt) =>
-    config.provider === 'anthropic' ? viaAnthropic(userMsg) : viaGemini(userMsg, attempt);
+    config.provider === 'anthropic' ? viaAnthropic(system, userMsg) : viaGemini(system, userMsg, attempt);
   const text = await withRetry(call);
-  return parseJson(text);
+  const result = parseJson(text);
+  result.kind = kind;
+  return result;
 }
 
 // 일시적 과부하(503/429/overloaded)에 모델 폴백 + 지수백오프 재시도 — 무료티어 대비
@@ -62,7 +100,7 @@ const GEMINI_MODELS = [
   ...new Set([config.geminiModel, 'gemini-2.0-flash', 'gemini-2.5-flash-lite']),
 ];
 let geminiClient;
-async function viaGemini(userMsg, attempt = 0) {
+async function viaGemini(system, userMsg, attempt = 0) {
   const { GoogleGenAI } = await import('@google/genai');
   geminiClient ||= new GoogleGenAI({ apiKey: config.geminiKey });
   const model = GEMINI_MODELS[Math.min(attempt, GEMINI_MODELS.length - 1)];
@@ -70,7 +108,7 @@ async function viaGemini(userMsg, attempt = 0) {
     model,
     contents: userMsg,
     config: {
-      systemInstruction: SYSTEM,
+      systemInstruction: system,
       responseMimeType: 'application/json', // JSON 출력 강제
       temperature: 0,
     },
@@ -80,14 +118,14 @@ async function viaGemini(userMsg, attempt = 0) {
 
 // --- Anthropic Haiku (운영 전환용) ---
 let anthropicClient;
-async function viaAnthropic(userMsg) {
+async function viaAnthropic(system, userMsg) {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   anthropicClient ||= new Anthropic({ apiKey: config.anthropicKey });
   const msg = await anthropicClient.messages.create({
     model: config.haikuModel,
     max_tokens: 1024,
-    // 라우팅 맵은 매 호출 동일 → 프롬프트 캐시로 비용 절감
-    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    // 분류 기준(bug/feedback별 고정 프롬프트)은 매 호출 동일 → 프롬프트 캐시로 비용 절감
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: userMsg }],
   });
   return msg.content.map((b) => b.text || '').join('');

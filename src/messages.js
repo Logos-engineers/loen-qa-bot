@@ -46,6 +46,35 @@ export function issueMessage(result, issue) {
   return lines.join('\n');
 }
 
+const FEEDBACK_TYPE_KO = {
+  ux: '사용성 불편',
+  request: '기능 요청',
+  content: '콘텐츠/문구',
+  etc: '일반 의견',
+};
+
+export function feedbackIssueMessage(result, issue) {
+  const names = issue.labels.map((l) => l.name || l);
+  const area = names.find((l) => l.startsWith('area/'));
+  const feat = names.find((l) => l.startsWith('feat/'));
+  const triage = names.includes('needs-triage');
+
+  const lines = [
+    `✅ 피드백을 등록했어요! (#${issue.number})`,
+    `> ${result.summary || issue.title}`,
+    '',
+    `💡 유형 · ${FEEDBACK_TYPE_KO[result.feedbackType] || result.feedbackType || '미정'}`,
+    `🗂 영역 · ${AREA_KO[area] || area || '미정'}${feat ? ` / ${FEAT_KO[feat] || feat}` : ''}`,
+    '',
+    `🔗 ${issue.html_url}`,
+    '',
+    triage
+      ? '소중한 의견 감사합니다 🙏 일부는 제가 추정으로 채웠으니 한 번 확인해주세요.'
+      : '소중한 의견 감사합니다 🙏 검토 후 반영을 고려할게요.',
+  ];
+  return lines.join('\n');
+}
+
 export function dupMessage(dup) {
   return [
     `🔎 이미 등록된 제보 같아요 (#${dup.number})`,

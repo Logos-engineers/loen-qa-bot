@@ -20,6 +20,8 @@ const r2Enabled = !!(
 export const config = {
   discordToken: req('DISCORD_BOT_TOKEN'),
   forumChannelId: req('QA_FORUM_CHANNEL_ID'),
+  // 베타 피드백(불편·개선) 전용 포럼. 비우면 피드백 트랙 비활성(QA만 동작).
+  feedbackForumChannelId: process.env.FEEDBACK_FORUM_CHANNEL_ID || null,
 
   // 분류 모델 (provider 스위치)
   provider,
